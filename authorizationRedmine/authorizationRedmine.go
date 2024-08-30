@@ -16,8 +16,6 @@ var loginURL = "https://redmin.org/login"
 var targetURL = "https://redmine..org/projects/..."
 
 func AuthorizationRedmine(login string, pass string, userFirstName string, ch chan<- string) {
-	fmt.Println("првиет from authorizationRedmine")
-	fmt.Println(" userFirstName", userFirstName)
 	nameSurname := FetchUsernamesFromDB(userFirstName)
 	fmt.Println(nameSurname)
 	jar, err := cookiejar.New(nil)
