@@ -1,19 +1,21 @@
 package authorization
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/lib/pq"
 	"golang.org/x/net/html"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"strings"
 )
 
-var loginURL = "https://redmin.org/login"
-var targetURL = "https://redmine..org/projects/..."
+var loginURL = "https://redmine/login"
+var targetURL = "https://redmin.org/projects/"
 
 func AuthorizationRedmine(login string, pass string, userFirstName string, ch chan<- string) {
 	nameSurname := FetchUsernamesFromDB(userFirstName)
@@ -35,33 +37,12 @@ func AuthorizationRedmine(login string, pass string, userFirstName string, ch ch
 	if err != nil {
 		log.Fatal(err)
 	}
-	loginForm := url.Values{}
-
-	var parseForm func(*html.Node)
-	parseForm = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "input" {
-			var name, value string
-			for _, attr := range n.Attr {
-				if attr.Key == "name" {
-					name = attr.Val
-				}
-				if attr.Key == "value" {
-					value = attr.Val
-				}
-			}
-			if name != "" {
-				loginForm.Set(name, value)
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			parseForm(c)
-		}
-	}
-	parseForm(doc)
+	var loginForm = &url.Values{}
+	parseForm(doc, loginForm)
 	loginForm.Set("username", login)
 	loginForm.Set("password", pass)
 
-	resp, err = client.PostForm(loginURL, loginForm)
+	resp, err = client.PostForm(loginURL, *loginForm)
 
 	if err != nil {
 		log.Fatal(err)
@@ -71,7 +52,6 @@ func AuthorizationRedmine(login string, pass string, userFirstName string, ch ch
 	if resp.StatusCode != http.StatusOK {
 		log.Fatal("Login error: ", resp.Status)
 	}
-	//parsing html-странцы -> чтобы конкретный пользователь получил свои задачи и статус
 	resp, err = client.Get(targetURL)
 	if err != nil {
 		log.Fatal(err)
@@ -81,71 +61,90 @@ func AuthorizationRedmine(login string, pass string, userFirstName string, ch ch
 	if err != nil {
 		log.Fatal(err)
 	}
-	// функция для парсинга страницы
-	var parsingPage func(*html.Node)
-	parsingPage = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "tr" {
-			var taskID, taskStatus, taskDesc, taskAssignedTo string
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				if c.Type == html.ElementNode && c.Data == "td" {
-					for _, attr := range c.Attr {
-						if attr.Key == "class" && attr.Val == "assigned_to" {
-							if c.FirstChild != nil && c.FirstChild.FirstChild != nil {
-								var sb strings.Builder
-								html.Render(&sb, c.FirstChild.FirstChild)
-								taskAssignedTo = sb.String()
-							}
-						}
-						if attr.Key == "class" && attr.Val == "id" {
-							if c.FirstChild != nil && c.FirstChild.FirstChild != nil {
-								var sb strings.Builder
-								html.Render(&sb, c.FirstChild.FirstChild)
-								taskID = sb.String()
-							}
-						}
-						if attr.Key == "class" && attr.Val == "status" {
-							if c.FirstChild != nil {
-								var sb strings.Builder
-								html.Render(&sb, c.FirstChild)
-								taskStatus = sb.String()
-							}
-						}
-						if attr.Key == "class" && attr.Val == "subject" {
-							if c.FirstChild != nil && c.FirstChild.FirstChild != nil {
-								var sb strings.Builder
-								html.Render(&sb, c.FirstChild.FirstChild)
-								taskDesc = sb.String()
-							}
-						}
-					}
-				}
-			}
-			if taskAssignedTo == nameSurname {
-				fmt.Println(taskID, "статус", taskStatus, "описание", taskDesc)
-				message := fmt.Sprintf("TaskID: %s\nStatus: %s\nDescription: %s\nAssignedTo: %s", taskID, taskStatus, taskDesc, taskAssignedTo)
-				ch <- message
-			}
-		}
+	tasks := parseTasks(page, nameSurname)
 
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			parsingPage(c)
-		}
+	for _, task := range tasks {
+		ch <- task
 	}
-	parsingPage(page)
 	close(ch)
 }
 
 func FetchUsernamesFromDB(tgacc string) string {
 	var nameSurname string
-	connStr := "user=postgres password = ..  dbname=tgacc sslmode=disable client_encoding=UTF8"
-	db, err := sql.Open("postgres", connStr)
+	conn := "postgres://"
+	pool, err := pgxpool.New(context.Background(), conn)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-	err = db.QueryRow("SELECT namesurname FROM tgacc WHERE tgacc = $1", tgacc).Scan(&nameSurname)
+	defer pool.Close()
+	err = pool.QueryRow(context.Background(), "SELECT namesurname FROM tgacc WHERE tgacc = $1", tgacc).Scan(&nameSurname)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
+		return ""
 	}
 	return nameSurname
+}
+func parseForm(n *html.Node, loginForm *url.Values) {
+	if n.Type == html.ElementNode && n.Data == "input" {
+		var name, value string
+		for _, attr := range n.Attr {
+			if attr.Key == "name" {
+				name = attr.Val
+			}
+			if attr.Key == "value" {
+				value = attr.Val
+			}
+		}
+		if name != "" {
+			loginForm.Set(name, value)
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		parseForm(c, loginForm)
+	}
+}
+func parseTasks(n *html.Node, nameSurname string) []string {
+	var tasks []string
+	if n.Type == html.ElementNode && n.Data == "tr" {
+		var taskID, taskStatus, taskDesc, taskAssignedTo string
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.ElementNode && c.Data == "td" {
+				for _, attr := range c.Attr {
+					if attr.Key == "class" {
+						switch attr.Val {
+						case "assigned_to":
+							if c.FirstChild != nil && c.FirstChild.FirstChild != nil {
+								taskAssignedTo = getTextContent(c.FirstChild.FirstChild)
+							}
+						case "id":
+							if c.FirstChild != nil && c.FirstChild.FirstChild != nil {
+								taskID = getTextContent(c.FirstChild.FirstChild)
+							}
+						case "status":
+							if c.FirstChild != nil {
+								taskStatus = getTextContent(c.FirstChild)
+							}
+						case "subject":
+							if c.FirstChild != nil && c.FirstChild.FirstChild != nil {
+								taskDesc = getTextContent(c.FirstChild.FirstChild)
+							}
+						}
+					}
+				}
+			}
+		}
+		if taskAssignedTo == nameSurname {
+			message := fmt.Sprintf("TaskID: %s\nStatus: %s\nDescription: %s\nAssignedTo: %s", taskID, taskStatus, taskDesc, taskAssignedTo)
+			tasks = append(tasks, message)
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		tasks = append(tasks, parseTasks(c, nameSurname)...)
+	}
+	return tasks
+}
+func getTextContent(n *html.Node) string {
+	var sb strings.Builder
+	html.Render(&sb, n)
+	return sb.String()
 }

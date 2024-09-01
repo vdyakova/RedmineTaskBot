@@ -7,8 +7,8 @@ import (
 	authorization "tgtest/authorizationRedmine"
 )
 
-var loginRD = " "
-var passwordRD = " "
+var loginRD = ""
+var passwordRD = ""
 
 func TelegramBot() {
 	var userFirstName string
@@ -30,8 +30,8 @@ func TelegramBot() {
 			fmt.Println("Username", chatId.ID)
 			if update.Message.From != nil {
 				userFirstName = update.Message.From.FirstName
-				userLastName  = update.Message.From.LastName
-				userUsername  = update.Message.From.Username
+				userLastName = update.Message.From.LastName
+				userUsername = update.Message.From.Username
 				fmt.Printf("Username: %s %s (@%s)\n", userFirstName, userLastName, userUsername)
 			}
 			// авторизация в Redmine и установление личности для которого нужно узнать информацию о задачах
