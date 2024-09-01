@@ -15,7 +15,7 @@ import (
 )
 
 var loginURL = "https://redmine/login"
-var targetURL = "https://redmin.org/projects/"
+var targetURL = "https://redmine.org/projects/"
 
 func AuthorizationRedmine(login string, pass string, userFirstName string, ch chan<- string) {
 	nameSurname := FetchUsernamesFromDB(userFirstName)
