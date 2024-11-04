@@ -1,16 +1,14 @@
 package authorization
 
 import (
-	"context"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/lib/pq"
 	"golang.org/x/net/html"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
+
 	"strings"
 )
 
@@ -69,21 +67,6 @@ func AuthorizationRedmine(login string, pass string, userFirstName string, ch ch
 	close(ch)
 }
 
-func FetchUsernamesFromDB(tgacc string) string {
-	var nameSurname string
-	conn := "postgres://"
-	pool, err := pgxpool.New(context.Background(), conn)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer pool.Close()
-	err = pool.QueryRow(context.Background(), "SELECT namesurname FROM tgacc WHERE tgacc = $1", tgacc).Scan(&nameSurname)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
-		return ""
-	}
-	return nameSurname
-}
 func parseForm(n *html.Node, loginForm *url.Values) {
 	if n.Type == html.ElementNode && n.Data == "input" {
 		var name, value string

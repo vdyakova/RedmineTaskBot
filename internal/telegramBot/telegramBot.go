@@ -4,17 +4,16 @@ import (
 	"fmt"
 	"github.com/mymmrac/telego"
 	"os"
-	authorization "tgtest/authorizationRedmine"
+	authorization "redminetb/internal/authorizationRedmine"
 )
-
-var loginRD = ""
-var passwordRD = ""
 
 func TelegramBot() {
 	var userFirstName string
 	var userLastName string
 	var userUsername string
-	botToken := " "
+	loginRD := os.Getenv("LOGIN_RD")
+	passwordRD := os.Getenv("PASSWORD_RD")
+	botToken := os.Getenv("BOT_TOKEN")
 	bot, err := telego.NewBot(botToken, telego.WithDefaultDebugLogger())
 	if err != nil {
 		fmt.Println(err)
